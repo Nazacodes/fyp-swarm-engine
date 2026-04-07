@@ -19,12 +19,18 @@ timestamps = []
 temperatures: Dict[str, List[float]] = {}
 actions: Dict[str, List[str]] = {}
 pheromones: Dict[str, Dict[str, List[float]]] = {}
+avg_temps: List[float] = []
+swarm_state: Dict[str, dict] = {}
 
 def message_handler(msg: dict):
-    global timestamps, temperatures, actions, pheromones
-    msg_type = msg.get("type")
-    if msg_type == "state":
-        node_id = msg.get("node_id")
+    global timestamps, temperatures, actions, pheromones, avg_temps, swarm_state
+
+    topic = msg.get("topic", "")
+    payload = msg.get("payload", {})
+    msg_type = payload.get("type")
+
+    if "telemetry." in topic and msg_type in ("state", "telemetry"):
+        node_id = payload.get("node_id")
         if node_id:
             now = time.time()
             timestamps.append(now)
@@ -33,18 +39,29 @@ def message_handler(msg: dict):
                 actions[node_id] = []
                 pheromones[node_id] = {action: [] for action in ["HEAT_UP", "COOL_DOWN", "IDLE"]}
 
-            temperatures[node_id].append(msg.get("temp", 0))
-            actions[node_id].append(msg.get("action", "UNKNOWN"))
+            temperatures[node_id].append(payload.get("temp", 0))
+            actions[node_id].append(payload.get("action", "UNKNOWN"))
+            swarm_state[node_id] = payload
 
             # Pheromones
-            node_pher = msg.get("pheromones", {})
-            for action in pheromones[node_id]:
-                pheromones[node_id][action].append(node_pher.get(action, 1.0))
+            node_pher = payload.get("pheromones", {})
+            if isinstance(node_pher, dict) and "near" in node_pher:  # Handle bucketed pheromones
+                bucket_pher = node_pher["near"]
+                for action in pheromones[node_id]:
+                    pheromones[node_id][action].append(bucket_pher.get(action, 1.0))
+            else:
+                # Fallback for old flat structure
+                for action in pheromones[node_id]:
+                    pheromones[node_id][action].append(node_pher.get(action, 1.0))
+
+            if swarm_state:
+                avg = sum(state["temp"] for state in swarm_state.values()) / len(swarm_state)
+                avg_temps.append(avg)
 
 def run_collector():
     config = load_config(None)
     messenger = create_messenger(config)
-    messenger.subscribe(["swarm.state"], message_handler)
+    messenger.subscribe(["swarm.temperature.telemetry.*"], message_handler)
 
     while True:
         if hasattr(messenger, "process_events"):
@@ -77,10 +94,20 @@ def animate(frame):
     plt.ylabel("Action")
     plt.legend()
 
+    # Plot room average temperature
+    plt.subplot(2, 2, 3)
+    if avg_temps:
+        plt.plot(timestamps[-len(avg_temps):], avg_temps, color='black', linewidth=2.5, label='Room Avg')
+        plt.axhline(y=22.0, color='red', linestyle='--', linewidth=1.5, label='Target')
+    plt.title('Room Average Temperature')
+    plt.xlabel('Time')
+    plt.ylabel('Temp (°C)')
+    plt.legend()
+
     # Plot pheromones for one node (e.g., first)
     if pheromones:
         node = list(pheromones.keys())[0]
-        plt.subplot(2, 2, 3)
+        plt.subplot(2, 2, 4)
         for action, phers in pheromones[node].items():
             plt.plot(timestamps[-len(phers):], phers, label=action)
         plt.title(f"Pheromones ({node})")

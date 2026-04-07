@@ -26,7 +26,7 @@ class SwarmMessenger(ABC):
 
 
 class RabbitMQMessenger(SwarmMessenger):
-    def __init__(self, host: str, user: str, password: str, exchange: str = "swarm.bus"):
+    def __init__(self, host: str, user: str, password: str, exchange: str = "swarm.temperature"):
         self.exchange = exchange
         self.host = host
         self.user = user
@@ -50,7 +50,7 @@ class RabbitMQMessenger(SwarmMessenger):
             self.channel = self.connection.channel()
             self.channel.exchange_declare(
                 exchange=self.exchange,
-                exchange_type="fanout",
+                exchange_type="topic",
                 durable=True,
             )
             q = self.channel.queue_declare(queue="", exclusive=True)
@@ -77,18 +77,19 @@ class RabbitMQMessenger(SwarmMessenger):
             logger.warning("RabbitMQ publish failed: %r, fallback triggered", e)
 
     def subscribe(self, routing_keys: List[str], on_message: Callable[[Dict], None]) -> None:
-        # In fanout exchange routing_keys are ignored; bind the queue once.
         try:
-            self.channel.queue_bind(
-                exchange=self.exchange,
-                queue=self.queue_name,
-                routing_key="",
-            )
+            for routing_key in routing_keys:
+                self.channel.queue_bind(
+                    exchange=self.exchange,
+                    queue=self.queue_name,
+                    routing_key=routing_key,
+                )
             self.channel.basic_consume(
                 queue=self.queue_name,
-                on_message_callback=lambda ch, method, properties, body: on_message(
-                    json.loads(body.decode("utf-8"))
-                ),
+                on_message_callback=lambda ch, method, properties, body: on_message({
+                    "topic": method.routing_key,
+                    "payload": json.loads(body.decode("utf-8"))
+                }),
                 auto_ack=True,
             )
         except Exception as e:

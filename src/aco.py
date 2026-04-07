@@ -1,106 +1,184 @@
-# aco.py
-
-import random
 import time
-from typing import List, Dict, Any, Tuple
+import random
+from collections import deque
+from typing import List, Dict, Any
 
 
 class ACOTemperatureNode:
-    def __init__(self, node_id: str, target_temp: float):
+    def __init__(
+        self,
+        node_id: str,
+        target_temp: float,
+        alpha: float = 1.6,
+        beta: float = 1.2,
+        rho: float = 0.92,
+        q: float = 2.0,
+        deadband: float = 0.2,
+        local_weight: float = 0.7,
+        global_weight: float = 0.3,
+        history_size: int = 5,
+        tau0: float = 1.0,
+        local_decay: float = 0.15,
+    ):
         self.node_id = node_id
         self.target_temp = target_temp
+        self.alpha = alpha
+        self.beta = beta
+        self.rho = rho
+        self.q = q
+        self.deadband = deadband
+        self.local_weight = local_weight
+        self.global_weight = global_weight
+        self.history = deque(maxlen=history_size)
         self.actions = ["HEAT_UP", "COOL_DOWN", "IDLE"]
-        self.pheromone = {action: 1.0 for action in self.actions}  # Initial pheromone
-        self.evaporation_rate = 0.99  # Even slower evaporation for better learning
-        self.alpha = 3.0  # Higher pheromone weight for more deterministic choices
-        self.beta = 1.0   # Lower heuristic weight
-        self.last_action = "IDLE"
-        self.last_reward = 0.0
-        self._global_avg: float = 0.0
+        self.tau0 = tau0
+        self.local_decay = local_decay
+
+        self.pheromone = {
+            "far_below": {a: tau0 for a in self.actions},
+            "below": {a: tau0 for a in self.actions},
+            "near": {a: tau0 for a in self.actions},
+            "above": {a: tau0 for a in self.actions},
+            "far_above": {a: tau0 for a in self.actions},
+        }
+
+        self._global_avg = target_temp
         self._last_gather = 0.0
+        self._last_action = "IDLE"
+        self._last_error = None
+        self._last_bucket = "near"
+        self._global_target = target_temp
+
+    def _bucket(self, error: float) -> str:
+        if error > 1.5:
+            return "far_below"
+        if error > 0.35:
+            return "below"
+        if error < -1.5:
+            return "far_above"
+        if error < -0.35:
+            return "above"
+        return "near"
 
     def update_from_swarm(self, swarm_states: List[Dict[str, Any]]) -> None:
-        """Update global average and aggregate shared pheromones."""
         temps = [s["temp"] for s in swarm_states if "temp" in s]
         if temps:
             self._global_avg = sum(temps) / len(temps)
             self._last_gather = time.time()
 
-        # Aggregate pheromones from swarm
         swarm_pheromones = [s.get("pheromones", {}) for s in swarm_states if "pheromones" in s]
         if swarm_pheromones:
-            # Average pheromones across nodes
-            avg_pheromone = {}
-            for action in self.actions:
-                values = [p.get(action, 1.0) for p in swarm_pheromones]
-                avg_pheromone[action] = sum(values) / len(values)
-            # Blend with local (e.g., 70% swarm, 30% local)
-            for action in self.actions:
-                self.pheromone[action] = 0.7 * avg_pheromone[action] + 0.3 * self.pheromone[action]
+            for bucket in self.pheromone:
+                for action in self.actions:
+                    vals = []
+                    for p in swarm_pheromones:
+                        if bucket in p and action in p[bucket]:
+                            vals.append(p[bucket][action])
+                    if vals:
+                        avg = sum(vals) / len(vals)
+                        self.pheromone[bucket][action] = 0.85 * self.pheromone[bucket][action] + 0.15 * avg
 
-    def get_pheromones(self) -> Dict[str, float]:
-        """Return current pheromones for sharing."""
-        return self.pheromone.copy()
+    def set_global_target(self, new_target: float) -> None:
+        """Update the global target temperature and local target setpoint."""
+        self._global_target = new_target
+        self.target_temp = new_target
 
+    def get_pheromones(self) -> Dict[str, Dict[str, float]]:
+        """Return current pheromone buckets."""
+        return self.pheromone
 
-    def _calculate_reward(self, local_temp: float, action: str) -> float:
-        """Reward based on how much closer to target after action."""
-        # Simulate action effect (simplified)
-        if action == "HEAT_UP":
-            simulated_temp = local_temp + 0.5
-        elif action == "COOL_DOWN":
-            simulated_temp = local_temp - 0.5
-        else:
-            simulated_temp = local_temp
+    def _smooth_local(self, local_temp: float) -> float:
+        self.history.append(local_temp)
+        return sum(self.history) / len(self.history)
 
-        delta_before = abs(local_temp - self.target_temp)
-        delta_after = abs(simulated_temp - self.target_temp)
-        reward = max(0, delta_before - delta_after) * 10.0  # Amplify reward for stronger learning
-        return reward
+    def _heuristic(self, bucket: str, error: float) -> Dict[str, float]:
+        heur = {
+            "HEAT_UP": 0.2,
+            "COOL_DOWN": 0.2,
+            "IDLE": 0.2,
+        }
 
-    def _select_action_aco(self, local_temp: float) -> str:
-        """Select action using ACO probabilities."""
-        probabilities = {}
-        total = 0.0
+        if bucket == "far_below":
+            heur["HEAT_UP"] = 3.0 + abs(error)
+            heur["IDLE"] = 0.3
+        elif bucket == "below":
+            heur["HEAT_UP"] = 2.0 + abs(error)
+            heur["IDLE"] = 0.8
+        elif bucket == "near":
+            heur["IDLE"] = 3.0
+            heur["HEAT_UP"] = 0.7
+            heur["COOL_DOWN"] = 0.7
+        elif bucket == "above":
+            heur["COOL_DOWN"] = 2.0 + abs(error)
+            heur["IDLE"] = 0.8
+        elif bucket == "far_above":
+            heur["COOL_DOWN"] = 3.0 + abs(error)
+            heur["IDLE"] = 0.3
+
+        return heur
+
+    def _local_update(self, bucket: str, action: str) -> None:
+        self.pheromone[bucket][action] = (
+            (1 - self.local_decay) * self.pheromone[bucket][action]
+            + self.local_decay * self.tau0
+        )
+
+    def _global_update(self, bucket: str, action: str, improvement: float) -> None:
+        for b in self.pheromone:
+            for a in self.actions:
+                self.pheromone[b][a] *= self.rho
+
+        if improvement > 0:
+            self.pheromone[bucket][action] += self.q * improvement
+
+        for b in self.pheromone:
+            for a in self.actions:
+                self.pheromone[b][a] = max(0.05, min(25.0, self.pheromone[b][a]))
+
+    def _select_action(self, bucket: str, error: float) -> str:
+        heur = self._heuristic(bucket, error)
+        scores = {}
 
         for action in self.actions:
-            heuristic = self._calculate_reward(local_temp, action) + 1.0  # Avoid zero
-            prob = (self.pheromone[action] ** self.alpha) * (heuristic ** self.beta)
-            probabilities[action] = prob
-            total += prob
+            tau = self.pheromone[bucket][action] ** self.alpha
+            eta = heur[action] ** self.beta
+            scores[action] = tau * eta
 
-        if total == 0:
-            return random.choice(self.actions)
+        total = sum(scores.values())
+        if total <= 0:
+            return "IDLE"
 
-        # Roulette wheel selection
-        pick = random.uniform(0, total)
-        current = 0.0
-        for action, prob in probabilities.items():
-            current += prob
-            if pick <= current:
+        r = random.random()
+        cumulative = 0.0
+        for action in self.actions:
+            cumulative += scores[action] / total
+            if r <= cumulative:
                 return action
-        return self.actions[-1]  # Fallback
-
-    def _update_pheromone(self, action: str, reward: float) -> None:
-        """Update pheromone based on reward."""
-        # Evaporate
-        for a in self.actions:
-            self.pheromone[a] *= self.evaporation_rate
-
-        # Deposit
-        self.pheromone[action] += reward
+        return "IDLE"
 
     def choose_action(self, local_temp: float, global_temp: float, is_leader: bool) -> str:
-        # Use global_temp for decision making to focus on global convergence
-        temp_to_use = global_temp
+        smooth_local = self._smooth_local(local_temp)
 
-        # Select action via ACO
-        action = self._select_action_aco(temp_to_use)
+        if self._last_gather > 0:
+            effective_temp = self.local_weight * smooth_local + self.global_weight * global_temp
+        else:
+            effective_temp = smooth_local
 
-        # Calculate reward for last action (delayed update)
-        if self.last_action:
-            reward = self._calculate_reward(temp_to_use, self.last_action)
-            self._update_pheromone(self.last_action, reward)
+        current_error = self.target_temp - effective_temp
+        bucket = self._bucket(current_error)
 
-        self.last_action = action
+        if self._last_error is not None:
+            improvement = abs(self._last_error) - abs(current_error)
+            self._global_update(self._last_bucket, self._last_action, improvement)
+
+        if abs(current_error) <= self.deadband:
+            action = "IDLE"
+        else:
+            action = self._select_action(bucket, current_error)
+
+        self._local_update(bucket, action)
+
+        self._last_error = current_error
+        self._last_action = action
+        self._last_bucket = bucket
         return action

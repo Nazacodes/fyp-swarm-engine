@@ -1,0 +1,9 @@
+{
+  "node_id": "node41",
+  "rabbit_host": "localhost",
+  "rabbit_user": "guest",
+  "rabbit_password": "guest",
+  "target_temp": 22.0,
+  "has_sensor": false,
+  "start_temp": 20.0
+}

@@ -13,23 +13,42 @@ class TemperatureSource(ABC):
     def read(self) -> float:
         ...
 
+    def apply_action(self, action: str) -> None:
+        pass
+
 
 class MockTemperatureSource(TemperatureSource):
-    def __init__(self, base_temp: float = 22.0, noise: float = 0.1):  # Reduced noise for better convergence
-        # Start with random initial temp between 15-30°C
-        self.base_temp = random.uniform(15.0, 30.0)
-        self.noise = noise
+    """Mock with internal state that responds to actions."""
+
+    def __init__(self, start_temp: float = 18.0, target_temp: float = 22.0):
+        self._internal_temp = start_temp
+        self._target_temp = target_temp
+        self._ambient_temp = start_temp
 
     def read(self) -> float:
-        return max(10.0, self.base_temp + random.uniform(-self.noise, self.noise))
+        noise = random.uniform(-0.06, 0.06)
+        return round(self._internal_temp + noise, 2)
 
     def apply_action(self, action: str) -> None:
-        """Apply the chosen action to adjust the base temperature."""
+        error = self._target_temp - self._internal_temp
+        ambient_pull = (self._ambient_temp - self._internal_temp) * 0.01
+
+        if abs(error) < 0.3:
+            step = 0.015
+        elif abs(error) < 1.0:
+            step = 0.04
+        else:
+            step = 0.10
+
         if action == "HEAT_UP":
-            self.base_temp += 0.5
+            self._internal_temp += step
         elif action == "COOL_DOWN":
-            self.base_temp -= 0.5
-        # IDLE does nothing
+            self._internal_temp -= step
+        else:
+            self._internal_temp += error * 0.015
+
+        self._internal_temp += ambient_pull
+        self._internal_temp = max(10.0, min(35.0, self._internal_temp))
 
 
 class RealSensorSource(TemperatureSource):
@@ -116,6 +135,10 @@ class RealSensorSource(TemperatureSource):
 
     def read(self) -> float:
         return self._inner.read()
+
+    def apply_action(self, action: str) -> None:
+        if hasattr(self._inner, 'apply_action'):
+            self._inner.apply_action(action)
 
 
 class _SimpleDS18B20(TemperatureSource):

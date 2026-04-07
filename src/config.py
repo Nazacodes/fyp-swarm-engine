@@ -14,6 +14,7 @@ def load_config(config_path: str = None) -> Dict[str, any]:
     rabbit_user = raw.get("rabbit_user") or os.environ.get("RABBIT_USER", "guest")
     rabbit_password = raw.get("rabbit_password") or os.environ.get("RABBIT_PASSWORD", "guest")
     target_temp = float(raw.get("target_temp") or os.environ.get("TARGET_TEMP", 22.0))
+    start_temp = float(raw.get("start_temp") or os.environ.get("START_TEMP", 20.0))
     has_sensor = raw.get("has_sensor", True)
     if isinstance(has_sensor, str):
         has_sensor = has_sensor.lower() in ("true", "1", "yes")
@@ -24,6 +25,7 @@ def load_config(config_path: str = None) -> Dict[str, any]:
         "rabbit_user": rabbit_user,
         "rabbit_password": rabbit_password,
         "target_temp": target_temp,
+        "start_temp": start_temp,
         "has_sensor": has_sensor,
     }
 
