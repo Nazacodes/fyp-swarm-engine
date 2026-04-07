@@ -19,6 +19,7 @@ class ACOTemperatureNode:
         history_size: int = 5,
         tau0: float = 1.0,
         local_decay: float = 0.15,
+        min_action_hold_seconds: float = 0.6,
     ):
         self.node_id = node_id
         self.target_temp = target_temp
@@ -33,6 +34,7 @@ class ACOTemperatureNode:
         self.actions = ["HEAT_UP", "COOL_DOWN", "IDLE"]
         self.tau0 = tau0
         self.local_decay = local_decay
+        self.min_action_hold_seconds = max(0.0, float(min_action_hold_seconds))
 
         self.pheromone = {
             "far_below": {a: tau0 for a in self.actions},
@@ -48,6 +50,7 @@ class ACOTemperatureNode:
         self._last_error = None
         self._last_bucket = "near"
         self._global_target = target_temp
+        self._last_action_at = 0.0
 
     def _bucket(self, error: float) -> str:
         if error > 1.5:
@@ -176,9 +179,28 @@ class ACOTemperatureNode:
         else:
             action = self._select_action(bucket, current_error)
 
+        # Damp fast oscillation by holding a non-idle action briefly
+        # unless the current error has crossed to the opposite side.
+        now = time.time()
+        if (
+            self._last_action_at > 0
+            and now - self._last_action_at < self.min_action_hold_seconds
+            and action != self._last_action
+        ):
+            same_side = (
+                self._last_error is None
+                or current_error == 0
+                or self._last_error == 0
+                or (current_error > 0 and self._last_error > 0)
+                or (current_error < 0 and self._last_error < 0)
+            )
+            if same_side:
+                action = self._last_action
+
         self._local_update(bucket, action)
 
         self._last_error = current_error
         self._last_action = action
         self._last_bucket = bucket
+        self._last_action_at = now
         return action

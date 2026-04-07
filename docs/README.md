@@ -26,7 +26,9 @@ fyp-swarm-engine/
 │   ├── leader_election.py # Leader election logic
 │   ├── aco.py             # ACO decision making
 │   ├── node.py            # Main node runner
-│   ├── web_monitor.py     # Flask web monitor with charts
+│   ├── web_monitor.py     # Flask web monitor backend
+│   ├── templates/         # Monitor HTML templates
+│   ├── static/            # Monitor CSS assets
 │   └── test_rabbitmq.py   # RabbitMQ test utility
 ├── requirements.txt       # Python dependencies
 └── LICENSE
@@ -38,7 +40,7 @@ fyp-swarm-engine/
 - **Leader Election**: Automatic leader selection based on node priorities.
 - **ACO Optimization**: Uses Ant Colony Optimization with **shared pheromone trails** for collaborative learning across the swarm.
 - **Messaging**: RabbitMQ for inter-node communication (with in-memory fallback).
-- **Web Monitor**: Real-time dashboard to view swarm state.
+- **Web Monitor**: Real-time dashboard with overview + trends pages.
 - **Configurable**: Via JSON config files or environment variables.
 
 ## Architecture
@@ -49,7 +51,7 @@ fyp-swarm-engine/
 - `src/leader_election.py`: Leader election logic.
 - `src/aco.py`: **ACO-based** decision making for temperature control (shared pheromone trails across swarm, probabilistic action selection).
 - `src/node.py`: Main node runner.
-- `src/web_monitor.py`: Flask web app for monitoring with real-time charts.
+- `src/web_monitor.py`: Flask web app for monitoring and trend charts.
 - `scripts/`: Run scripts for easy execution.
 - `docs/`: Documentation.
 
@@ -86,7 +88,26 @@ Create a `config.json` file (optional; defaults are used otherwise):
   "rabbit_user": "guest",
   "rabbit_password": "guest",
   "target_temp": 22.0,
-  "has_sensor": false
+  "has_sensor": false,
+  "peer_stale_seconds": 10.0,
+  "target_bounds": {
+    "min": 10.0,
+    "max": 35.0
+  },
+  "monitor_max_points": 300,
+  "aco": {
+    "alpha": 1.6,
+    "beta": 1.2,
+    "rho": 0.92,
+    "q": 2.0,
+    "deadband": 0.2,
+    "local_weight": 0.7,
+    "global_weight": 0.3,
+    "history_size": 5,
+    "tau0": 1.0,
+    "local_decay": 0.15,
+    "min_action_hold_seconds": 0.6
+  }
 }
 ```
 
@@ -97,6 +118,14 @@ Or set environment variables:
 - `RABBIT_PASSWORD`
 - `TARGET_TEMP`
 - `HAS_SENSOR`
+- `TARGET_MIN_TEMP`
+- `TARGET_MAX_TEMP`
+- `PEER_STALE_SECONDS`
+- `MONITOR_MAX_POINTS`
+- `ACO_ALPHA`, `ACO_BETA`, `ACO_RHO`, `ACO_Q`
+- `ACO_DEADBAND`, `ACO_LOCAL_WEIGHT`, `ACO_GLOBAL_WEIGHT`
+- `ACO_HISTORY_SIZE`, `ACO_TAU0`, `ACO_LOCAL_DECAY`
+- `ACO_MIN_ACTION_HOLD_SECONDS`
 
 ## Usage
 
@@ -151,8 +180,8 @@ Run the monitor to view the swarm:
 Access at: http://localhost:5000
 
 Includes:
-- Real-time node states, leader, heartbeats.
-- **Interactive charts** (/charts) showing temperatures, actions, and pheromone evolution.
+- Overview dashboard with leader status, convergence, heartbeat freshness, and action churn.
+- Trends page (`/charts`) with temperatures, actions, average-vs-target, and pheromone evolution.
 
 To allow connections from other machines:
 ```powershell

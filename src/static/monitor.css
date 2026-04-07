@@ -1,0 +1,84 @@
+body {
+    background: #f3f5f9;
+    color: #1f2937;
+}
+
+.app-nav {
+    background: linear-gradient(135deg, #1e3a8a 0%, #0f766e 100%);
+}
+
+.metric-card {
+    background: white;
+    border-radius: 12px;
+    padding: 14px 16px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.metric-label {
+    font-size: 0.8rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.metric-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.panel-card {
+    background: white;
+    border-radius: 14px;
+    border: 1px solid #e5e7eb;
+    padding: 16px;
+}
+
+.panel-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.node-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 12px;
+    background: #fbfdff;
+}
+
+.node-card.leader {
+    border-color: #f59e0b;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3);
+}
+
+.node-temp {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.heartbeat-list {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.heartbeat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #f1f5f9;
+    padding: 8px 0;
+}
+
+.freshness.fresh {
+    background: #16a34a;
+}
+
+.freshness.warning {
+    background: #d97706;
+}
+
+.freshness.stale,
+.freshness.unknown {
+    background: #6b7280;
+}

@@ -45,9 +45,43 @@ class Node:
         self.aco = ACOTemperatureNode(
             node_id=self.node_id,
             target_temp=config["target_temp"],
+            alpha=config.get("aco_alpha", 1.6),
+            beta=config.get("aco_beta", 1.2),
+            rho=config.get("aco_rho", 0.92),
+            q=config.get("aco_q", 2.0),
+            deadband=config.get("aco_deadband", 0.2),
+            local_weight=config.get("aco_local_weight", 0.7),
+            global_weight=config.get("aco_global_weight", 0.3),
+            history_size=config.get("aco_history_size", 5),
+            tau0=config.get("aco_tau0", 1.0),
+            local_decay=config.get("aco_local_decay", 0.15),
+            min_action_hold_seconds=config.get("aco_min_action_hold_seconds", 0.6),
         )
 
         self.swarm_state: Dict[str, dict] = {}
+        self.target_min_temp = float(config.get("target_min_temp", 10.0))
+        self.target_max_temp = float(config.get("target_max_temp", 35.0))
+        self.peer_stale_seconds = float(config.get("peer_stale_seconds", 10.0))
+
+    def _coerce_float(self, value, default: float = None):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _clamp_target(self, target: float) -> float:
+        return max(self.target_min_temp, min(self.target_max_temp, target))
+
+    def _fresh_peer_states(self, now: float) -> List[dict]:
+        fresh = []
+        for state in self.swarm_state.values():
+            ts = self._coerce_float(state.get("timestamp"))
+            temp = self._coerce_float(state.get("temp"))
+            if temp is None:
+                continue
+            if ts is None or now - ts <= self.peer_stale_seconds:
+                fresh.append(state)
+        return fresh
 
     def _publish_state(self, local_temp: float, is_leader: bool, action: str) -> None:
         # Safe attribute access
@@ -97,12 +131,18 @@ class Node:
         })
 
     def _on_message(self, msg: dict) -> None:
+        if not isinstance(msg, dict):
+            return
+
         if "topic" in msg:
             topic = msg["topic"]
-            payload = msg["payload"]
+            payload = msg.get("payload", {})
         else:
             topic = None
             payload = msg
+
+        if not isinstance(payload, dict):
+            return
 
         msg_type = payload.get("type")
         if not msg_type:
@@ -112,11 +152,16 @@ class Node:
             self.leader_elector.handle_heartbeat(payload)
         elif msg_type in ("state", "telemetry"):
             node_id = payload.get("node_id")
-            if node_id and node_id != self.node_id:  # Store peers only
+            temp = self._coerce_float(payload.get("temp"))
+            if node_id and node_id != self.node_id and temp is not None:  # Store peers only
+                payload["temp"] = temp
+                ts = self._coerce_float(payload.get("timestamp"), time.time())
+                payload["timestamp"] = ts if ts is not None else time.time()
                 self.swarm_state[node_id] = payload
         elif msg_type == "target_update":
-            new_target = payload.get("target_temp")
+            new_target = self._coerce_float(payload.get("target_temp"))
             if new_target is not None:
+                new_target = self._clamp_target(new_target)
                 if hasattr(self.aco, "set_global_target"):
                     self.aco.set_global_target(new_target)
                 logger.info(f"[{self.node_id}] Target update: {new_target}°C")
@@ -148,8 +193,10 @@ class Node:
                 logger.warning("Sensor read failed: %r", e)
                 local_temp = 22.0
 
-            # Compute global average (include self)
-            all_temps = [s["temp"] for s in self.swarm_state.values()] + [local_temp]
+            fresh_states = self._fresh_peer_states(now)
+
+            # Compute global average (include self + fresh peers only)
+            all_temps = [self._coerce_float(s.get("temp"), local_temp) for s in fresh_states] + [local_temp]
             global_avg = sum(all_temps) / len(all_temps) if all_temps else local_temp
 
             is_leader = self.leader_elector.is_leader()
@@ -167,7 +214,7 @@ class Node:
 
             # Leader updates ACO from swarm
             if is_leader:
-                all_states = list(self.swarm_state.values()) + [{
+                all_states = fresh_states + [{
                     "temp": local_temp, "pheromones": getattr(self.aco, "get_pheromones", lambda: {})()
                 }]
                 self.aco.update_from_swarm(all_states)
@@ -178,7 +225,7 @@ class Node:
 
             leader_id = self.leader_elector.current_leader()
             if leader_id == self.node_id:
-                logger.info("Leader %s: %.1f°C %s (peers: %d)", self.node_id, local_temp, action, len(self.swarm_state))
+                logger.info("Leader %s: %.1f°C %s (peers: %d)", self.node_id, local_temp, action, len(fresh_states))
             elif leader_id:
                 logger.debug("Node %s: %.1f°C %s (leader: %s)", self.node_id, local_temp, action, leader_id)
 
