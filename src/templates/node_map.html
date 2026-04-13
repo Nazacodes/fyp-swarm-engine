@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Swarm Node Map{% endblock %}
+
+{% block head_extras %}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="panel-card mb-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="panel-title mb-0"><i class="fas fa-project-diagram me-2"></i>Live Node Map</div>
+        <div class="small text-muted" id="map-meta">Loading topology...</div>
+    </div>
+    <div class="node-map-legend mt-3">
+        <span class="legend-chip leader">Leader</span>
+        <span class="legend-chip member">Member</span>
+        <span class="legend-chip stale">Stale/Unknown</span>
+        <span class="legend-chip edge-leader">Member -> Leader</span>
+        <span class="legend-chip edge-council">Leader Council Link</span>
+    </div>
+</div>
+
+<div class="panel-card">
+    <div id="node-map-canvas"></div>
+    <div id="node-map-empty" class="text-muted py-4 text-center d-none">
+        Waiting for swarm telemetry... start nodes to see topology.
+    </div>
+</div>
+
+<script>
+    const container = document.getElementById("node-map-canvas");
+    const emptyState = document.getElementById("node-map-empty");
+    const meta = document.getElementById("map-meta");
+
+    const nodes = new vis.DataSet([]);
+    const edges = new vis.DataSet([]);
+
+    const network = new vis.Network(container, { nodes, edges }, {
+        autoResize: true,
+        interaction: {
+            hover: true,
+            navigationButtons: true,
+            tooltipDelay: 80
+        },
+        physics: {
+            enabled: true,
+            stabilization: false,
+            barnesHut: {
+                gravitationalConstant: -1800,
+                centralGravity: 0.2,
+                springLength: 150,
+                springConstant: 0.05
+            }
+        },
+        nodes: {
+            shape: "dot",
+            borderWidth: 2,
+            font: { color: "#e2e8f0", face: "Inter, Segoe UI, sans-serif" }
+        },
+        edges: {
+            smooth: { enabled: true, type: "dynamic" },
+            color: { inherit: false, color: "#64748b", opacity: 0.9 }
+        }
+    });
+
+    function groupColor(groupId) {
+        const palette = ["#38bdf8", "#818cf8", "#34d399", "#f59e0b", "#fb7185", "#22d3ee", "#a78bfa", "#f472b6"];
+        let hash = 0;
+        for (let i = 0; i < groupId.length; i += 1) {
+            hash = (hash * 31 + groupId.charCodeAt(i)) >>> 0;
+        }
+        return palette[hash % palette.length];
+    }
+
+    function toVisNode(node) {
+        const stale = node.freshness === "stale" || node.freshness === "unknown";
+        const baseColor = stale ? "#6b7280" : groupColor(node.group_id || "default");
+        const isLeader = Boolean(node.is_leader);
+        const title = [
+            `<strong>${node.id}</strong>`,
+            `Group: ${node.group_id}`,
+            `Role: ${isLeader ? "Leader" : "Member"}`,
+            `Temp: ${node.temp === null ? "N/A" : Number(node.temp).toFixed(1) + " C"}`,
+            `Action: ${node.action || "UNKNOWN"}`,
+            `Freshness: ${node.freshness}`
+        ].join("<br>");
+
+        return {
+            id: node.id,
+            label: node.label || node.id,
+            title: title,
+            value: isLeader ? 38 : 24,
+            color: {
+                background: isLeader ? "#f59e0b" : baseColor,
+                border: isLeader ? "#fbbf24" : "#cbd5e1",
+                highlight: {
+                    background: isLeader ? "#fbbf24" : "#7dd3fc",
+                    border: "#ffffff"
+                },
+                hover: {
+                    background: isLeader ? "#fcd34d" : "#93c5fd",
+                    border: "#ffffff"
+                }
+            },
+            shadow: isLeader ? { enabled: true, color: "rgba(245,158,11,0.45)", size: 20, x: 0, y: 0 } : false
+        };
+    }
+
+    function toVisEdge(edge) {
+        const isCouncil = edge.kind === "leader_council";
+        return {
+            id: edge.id,
+            from: edge.from,
+            to: edge.to,
+            title: isCouncil ? "Leader council link" : `Group ${edge.group_id} member->leader link`,
+            width: isCouncil ? 2 : 3,
+            dashes: isCouncil,
+            arrows: isCouncil ? "" : "to",
+            color: isCouncil ? { color: "#a78bfa", opacity: 0.7 } : { color: "#22d3ee", opacity: 0.9 }
+        };
+    }
+
+    function render(payload) {
+        const nodeList = Array.isArray(payload.nodes) ? payload.nodes : [];
+        const edgeList = Array.isArray(payload.edges) ? payload.edges : [];
+        const hasData = nodeList.length > 0;
+
+        container.classList.toggle("d-none", !hasData);
+        emptyState.classList.toggle("d-none", hasData);
+
+        if (!hasData) {
+            meta.textContent = "No active node data yet";
+            nodes.clear();
+            edges.clear();
+            return;
+        }
+
+        nodes.update(nodeList.map(toVisNode));
+        edges.update(edgeList.map(toVisEdge));
+
+        const staleCount = nodeList.filter((n) => n.freshness === "stale" || n.freshness === "unknown").length;
+        meta.textContent = `${payload.meta.node_count} nodes | ${payload.meta.edge_count} links | ${payload.meta.leader_count} leaders | ${staleCount} stale`;
+    }
+
+    async function refreshGraph() {
+        try {
+            const response = await fetch("/api/node_map", { cache: "no-store" });
+            if (!response.ok) {
+                throw new Error("Failed to load node map");
+            }
+            const payload = await response.json();
+            render(payload);
+        } catch (err) {
+            meta.textContent = "Topology unavailable";
+            console.error(err);
+        }
+    }
+
+    refreshGraph();
+    setInterval(refreshGraph, 1500);
+</script>
+{% endblock %}

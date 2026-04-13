@@ -38,6 +38,7 @@ fyp-swarm-engine/
 
 - **Swarm Nodes**: Multiple nodes that simulate temperature sensors and decide heating/cooling actions.
 - **Leader Election**: Automatic leader selection based on node priorities.
+- **Hierarchical Leaders**: One leader per group plus optional leader-council communication across groups.
 - **ACO Optimization**: Uses Ant Colony Optimization with **shared pheromone trails** for collaborative learning across the swarm.
 - **Messaging**: RabbitMQ for inter-node communication (with in-memory fallback).
 - **Web Monitor**: Real-time dashboard with overview + trends pages.
@@ -84,6 +85,7 @@ Create a `config.json` file (optional; defaults are used otherwise):
 ```json
 {
   "node_id": "node1",
+  "group_id": "zone_a",
   "rabbit_host": "localhost",
   "rabbit_user": "guest",
   "rabbit_password": "guest",
@@ -95,6 +97,10 @@ Create a `config.json` file (optional; defaults are used otherwise):
     "max": 35.0
   },
   "monitor_max_points": 300,
+  "leader_bus_topic": "swarm.temperature.leaders",
+  "enable_leader_council": true,
+  "leader_sync_interval": 1.0,
+  "leader_signal_stale_seconds": 8.0,
   "aco": {
     "alpha": 1.6,
     "beta": 1.2,
@@ -103,6 +109,8 @@ Create a `config.json` file (optional; defaults are used otherwise):
     "deadband": 0.2,
     "local_weight": 0.7,
     "global_weight": 0.3,
+    "group_weight": 0.2,
+    "council_weight": 0.1,
     "history_size": 5,
     "tau0": 1.0,
     "local_decay": 0.15,
@@ -113,6 +121,7 @@ Create a `config.json` file (optional; defaults are used otherwise):
 
 Or set environment variables:
 - `NODE_ID`
+- `GROUP_ID`
 - `RABBIT_HOST`
 - `RABBIT_USER`
 - `RABBIT_PASSWORD`
@@ -121,9 +130,17 @@ Or set environment variables:
 - `TARGET_MIN_TEMP`
 - `TARGET_MAX_TEMP`
 - `PEER_STALE_SECONDS`
+- `LEADER_BUS_TOPIC`
+- `GROUP_TARGET_TOPIC`
+- `ENABLE_LEADER_COUNCIL`
+- `TARGET_VERSION_START`
+- `TARGET_EPOCH`
+- `LEADER_SYNC_INTERVAL`
+- `LEADER_SIGNAL_STALE_SECONDS`
 - `MONITOR_MAX_POINTS`
 - `ACO_ALPHA`, `ACO_BETA`, `ACO_RHO`, `ACO_Q`
 - `ACO_DEADBAND`, `ACO_LOCAL_WEIGHT`, `ACO_GLOBAL_WEIGHT`
+- `ACO_GROUP_WEIGHT`, `ACO_COUNCIL_WEIGHT`
 - `ACO_HISTORY_SIZE`, `ACO_TAU0`, `ACO_LOCAL_DECAY`
 - `ACO_MIN_ACTION_HOLD_SECONDS`
 
@@ -144,7 +161,7 @@ scripts\run.bat config.json
 ```
 
 ### Run Multiple Nodes (Swarm)
-Use different `node_id` for each:
+Use different `node_id` for each. Add `group_id` to split nodes into zones with one elected leader per zone:
 
 ```powershell
 # Terminal 1
@@ -155,6 +172,9 @@ NODE_ID=node2 python src/node.py
 
 # Terminal 3
 NODE_ID=node3 python src/node.py
+
+# Terminal 4 (different group)
+NODE_ID=node4 GROUP_ID=zone_b ENABLE_LEADER_COUNCIL=true python src/node.py
 ```
 
 Or use the swarm launcher (starts 2 nodes):
@@ -169,7 +189,22 @@ To add more nodes to the swarm:
 3. Run `python src/node.py`.
 4. Repeat for as many nodes as needed.
 
-All nodes will automatically join the same swarm via RabbitMQ and participate in leader election.
+Nodes with the same `GROUP_ID` elect a local leader. If `ENABLE_LEADER_COUNCIL=true`, group leaders publish summaries on `LEADER_BUS_TOPIC` and consume summaries from other leaders.
+For first runs, keep `ENABLE_LEADER_COUNCIL=false` until each group is converging, then enable it.
+
+### Hierarchical Validation Scenarios
+
+1. **One leader per group**
+   - Start at least 2 groups (`GROUP_ID=zone_a`, `GROUP_ID=zone_b`) with 2+ nodes each.
+   - Confirm monitor shows one active leader for each group.
+
+2. **Failover inside a group**
+   - Stop the current leader in `zone_a`.
+   - Confirm a new `zone_a` leader appears within heartbeat timeout.
+
+3. **Leader-council continuity**
+   - Run with `ENABLE_LEADER_COUNCIL=true`.
+   - Stop one group leader and verify remaining groups still publish fresh leader summaries.
 
 ### Web Monitor
 Run the monitor to view the swarm:
@@ -190,13 +225,29 @@ To allow connections from other machines:
 
 Then access at: http://<server-ip>:5000
 
+### Target Propagation Hierarchy
+
+Target updates now use a hierarchical control path to avoid split target state:
+
+1. Monitor/API acts as command source and publishes `target_update` to `swarm.temperature.cmd.target.set`.
+2. Group leaders consume that command, apply only newer `(epoch, version)` updates, then relay `group_target_apply` on `GROUP_TARGET_TOPIC` (default `swarm.temperature.group.target`).
+3. Member nodes apply only relayed group updates for their own `group_id`, and ignore stale/duplicate versions.
+4. Nodes publish `target_epoch` and `target_version` in telemetry so monitor can show consensus.
+
+Version ordering is strict: higher `(epoch, version)` always wins. This keeps all groups and nodes converging on one canonical target.
+
 ### Run Complete Demo
 Launch everything at once (nodes, monitor, visualization):
 ```powershell
 .\scripts\run_all.ps1 -Nodes 4
 ```
 
-Defaults to 3 nodes + monitor + visualize. Customize with `-Nodes 5 -Monitor:$false` etc.
+Defaults to 3 nodes + 2 groups + monitor + visualize. Customize with `-Nodes 10 -Groups 2 -Monitor:$true`.
+
+For CMD:
+```bat
+scripts\run_all.bat 10 2 yes yes
+```
 
 ## Connecting from Remote Machines
 
