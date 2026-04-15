@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Swarm Overview{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-3">
+    <div class="col-md-4 col-xl-2">
+        <div class="metric-card">
+            <div class="metric-label">Total Nodes</div>
+            <div class="metric-value">{{ nodes|length }}</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2">
+        <div class="metric-card">
+            <div class="metric-label">Fresh</div>
+            <div class="metric-value text-success">{{ fresh_count }}</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2">
+        <div class="metric-card">
+            <div class="metric-label">Stale</div>
+            <div class="metric-value text-secondary">{{ stale_count }}</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2">
+        <div class="metric-card">
+            <div class="metric-label">Leaders</div>
+            <div class="metric-value text-warning-emphasis">{{ leaders }}</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2">
+        <div class="metric-card">
+            <div class="metric-label">Room Average</div>
+            <div class="metric-value">{% if room_avg is not none %}{{ room_avg }}{% else %}N/A{% endif %}</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-xl-2">
+        <div class="metric-card">
+            <div class="metric-label">Error From Target</div>
+            <div class="metric-value">{% if room_err is not none %}{{ room_err }}{% else %}N/A{% endif %}</div>
+        </div>
+    </div>
+</div>
+
+<div class="panel-card mb-3">
+    <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
+        <div class="panel-title mb-0"><i class="fas fa-house-signal me-2"></i>Cluster Status</div>
+        <div class="d-flex align-items-center gap-2">
+            <label for="target-input" class="small text-muted mb-0">Target (C)</label>
+            <input id="target-input" type="number" step="0.1" min="0" max="40" value="{{ target_temp }}" class="form-control form-control-sm" style="width: 100px;">
+            <button id="target-apply" class="btn btn-sm btn-primary">Apply</button>
+            <span id="target-status" class="small text-muted"></span>
+        </div>
+    </div>
+    <div class="mt-2 d-flex align-items-center gap-2">
+        <button id="refresh-now" class="btn btn-sm btn-outline-secondary">Refresh Now</button>
+        <div class="form-check form-switch m-0">
+            <input class="form-check-input" type="checkbox" id="auto-refresh" checked>
+            <label class="form-check-label small text-muted" for="auto-refresh">Auto refresh (2s)</label>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    {% for n in nodes %}
+    <div class="col-lg-4 col-md-6">
+        <div class="node-card {% if n.is_leader %}leader{% endif %} {% if n.freshness != 'fresh' %}node-card-stale{% endif %}">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <div class="fw-semibold">{{ n.id }}</div>
+                {% if n.is_leader %}
+                <span class="badge text-bg-warning">Leader</span>
+                {% else %}
+                <span class="badge text-bg-light">Member</span>
+                {% endif %}
+            </div>
+            <div class="small text-muted mb-1">Group: {{ n.group_id }}</div>
+            <div class="small text-muted mb-2">Leader: {{ n.leader_id or 'n/a' }}</div>
+            <div class="d-flex justify-content-between">
+                <div>
+                    <div class="small text-muted">Temp</div>
+                    <div class="node-temp">{% if n.temp is not none %}{{ n.temp }} C{% else %}N/A{% endif %}</div>
+                </div>
+                <div class="text-end">
+                    <div class="small text-muted">Action</div>
+                    <div class="fw-semibold">{{ n.action }}</div>
+                </div>
+            </div>
+            <div class="mt-2">
+                <span class="badge {% if n.freshness == 'fresh' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                    {{ n.freshness|upper }}
+                </span>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+async function applyTarget() {
+    const input = document.getElementById("target-input");
+    const status = document.getElementById("target-status");
+    const val = Number(input.value);
+    if (!Number.isFinite(val)) {
+        status.textContent = "Invalid value";
+        return;
+    }
+    status.textContent = "Updating...";
+    try {
+        const resp = await fetch("/api/set_target", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ target_temp: val }),
+        });
+        if (!resp.ok) throw new Error("Target update failed");
+        const payload = await resp.json();
+        status.textContent = payload.published ? "Target broadcast sent" : "Updated locally (broadcast failed)";
+    } catch (err) {
+        status.textContent = "Update failed";
+        console.error(err);
+    }
+}
+
+document.getElementById("target-apply").addEventListener("click", applyTarget);
+document.getElementById("target-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") applyTarget();
+});
+
+document.getElementById("refresh-now").addEventListener("click", () => {
+    window.location.reload();
+});
+
+setInterval(() => {
+    const enabled = document.getElementById("auto-refresh").checked;
+    if (enabled) {
+        window.location.reload();
+    }
+}, 2000);
+</script>
+{% endblock %}

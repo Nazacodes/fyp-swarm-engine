@@ -1,0 +1,22 @@
+# Python caches/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Runtime logs and debug dumps
+logs/
+*.log
+debug-*.log
+
+# Generated experiment outputs
+reports/
+experiments/scenarios/fault_schedule.json
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

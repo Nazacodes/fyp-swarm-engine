@@ -1,0 +1,8 @@
+{
+  "seed": 42,
+  "target_temp": 22.0,
+  "rounds": 120,
+  "node_counts": [5, 10, 20, 30],
+  "modes": ["decentralized", "centralized"],
+  "faults_file": "experiments/scenarios/fault_schedule.json"
+}

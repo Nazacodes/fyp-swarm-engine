@@ -32,6 +32,7 @@ body {
     border-radius: 14px;
     border: 1px solid #e5e7eb;
     padding: 16px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
 .panel-title {
@@ -45,11 +46,22 @@ body {
     border-radius: 12px;
     padding: 12px;
     background: #fbfdff;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.node-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(2, 6, 23, 0.06);
 }
 
 .node-card.leader {
     border-color: #f59e0b;
     box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3);
+}
+
+.node-card-stale {
+    opacity: 0.72;
+    background: #f8fafc;
 }
 
 .node-temp {

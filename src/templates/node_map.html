@@ -22,6 +22,10 @@
 
 <div class="panel-card">
     <div id="node-map-canvas"></div>
+    <div id="node-map-fallback" class="d-none">
+        <div class="small text-muted mb-2">Graph library unavailable. Showing textual topology fallback.</div>
+        <div id="node-map-fallback-content" class="monitor-feed"></div>
+    </div>
     <div id="node-map-empty" class="text-muted py-4 text-center d-none">
         Waiting for swarm telemetry... start nodes to see topology.
     </div>
@@ -32,36 +36,41 @@
     const emptyState = document.getElementById("node-map-empty");
     const meta = document.getElementById("map-meta");
 
-    const nodes = new vis.DataSet([]);
-    const edges = new vis.DataSet([]);
+    const fallbackWrap = document.getElementById("node-map-fallback");
+    const fallbackContent = document.getElementById("node-map-fallback-content");
+    const hasVis = typeof window.vis !== "undefined" && typeof window.vis.DataSet !== "undefined";
+    const nodes = hasVis ? new vis.DataSet([]) : null;
+    const edges = hasVis ? new vis.DataSet([]) : null;
 
-    const network = new vis.Network(container, { nodes, edges }, {
-        autoResize: true,
-        interaction: {
-            hover: true,
-            navigationButtons: true,
-            tooltipDelay: 80
-        },
-        physics: {
-            enabled: true,
-            stabilization: false,
-            barnesHut: {
-                gravitationalConstant: -1800,
-                centralGravity: 0.2,
-                springLength: 150,
-                springConstant: 0.05
+    const network = hasVis
+        ? new vis.Network(container, { nodes, edges }, {
+            autoResize: true,
+            interaction: {
+                hover: true,
+                navigationButtons: true,
+                tooltipDelay: 80
+            },
+            physics: {
+                enabled: true,
+                stabilization: false,
+                barnesHut: {
+                    gravitationalConstant: -1800,
+                    centralGravity: 0.2,
+                    springLength: 150,
+                    springConstant: 0.05
+                }
+            },
+            nodes: {
+                shape: "dot",
+                borderWidth: 2,
+                font: { color: "#e2e8f0", face: "Inter, Segoe UI, sans-serif" }
+            },
+            edges: {
+                smooth: { enabled: true, type: "dynamic" },
+                color: { inherit: false, color: "#64748b", opacity: 0.9 }
             }
-        },
-        nodes: {
-            shape: "dot",
-            borderWidth: 2,
-            font: { color: "#e2e8f0", face: "Inter, Segoe UI, sans-serif" }
-        },
-        edges: {
-            smooth: { enabled: true, type: "dynamic" },
-            color: { inherit: false, color: "#64748b", opacity: 0.9 }
-        }
-    });
+        })
+        : null;
 
     function groupColor(groupId) {
         const palette = ["#38bdf8", "#818cf8", "#34d399", "#f59e0b", "#fb7185", "#22d3ee", "#a78bfa", "#f472b6"];
@@ -124,22 +133,31 @@
         const nodeList = Array.isArray(payload.nodes) ? payload.nodes : [];
         const edgeList = Array.isArray(payload.edges) ? payload.edges : [];
         const hasData = nodeList.length > 0;
+        const payloadMeta = payload.meta || { node_count: nodeList.length, edge_count: edgeList.length, leader_count: 0 };
 
-        container.classList.toggle("d-none", !hasData);
+        container.classList.toggle("d-none", !hasData || !hasVis);
+        fallbackWrap.classList.toggle("d-none", !hasData || hasVis);
         emptyState.classList.toggle("d-none", hasData);
 
         if (!hasData) {
             meta.textContent = "No active node data yet";
-            nodes.clear();
-            edges.clear();
+            if (nodes) nodes.clear();
+            if (edges) edges.clear();
             return;
         }
 
-        nodes.update(nodeList.map(toVisNode));
-        edges.update(edgeList.map(toVisEdge));
+        if (hasVis) {
+            nodes.update(nodeList.map(toVisNode));
+            edges.update(edgeList.map(toVisEdge));
+        } else {
+            const rows = nodeList
+                .sort((a, b) => (a.id || "").localeCompare(b.id || ""))
+                .map((n) => `${n.id} | group=${n.group_id} | ${n.freshness} | leader=${n.is_leader ? "yes" : "no"}`);
+            fallbackContent.textContent = rows.join("\n");
+        }
 
         const staleCount = nodeList.filter((n) => n.freshness === "stale" || n.freshness === "unknown").length;
-        meta.textContent = `${payload.meta.node_count} nodes | ${payload.meta.edge_count} links | ${payload.meta.leader_count} leaders | ${staleCount} stale`;
+        meta.textContent = `${payloadMeta.node_count} nodes | ${payloadMeta.edge_count} links | ${payloadMeta.leader_count} leaders | ${staleCount} stale`;
     }
 
     async function refreshGraph() {

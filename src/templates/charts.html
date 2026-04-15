@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Swarm Trends{% endblock %}
+
+{% block head_extras %}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="panel-card mb-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="panel-title mb-0"><i class="fas fa-chart-line me-2"></i>Swarm Trends</div>
+        <div class="small text-muted" id="charts-meta">Loading recent telemetry...</div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <div class="panel-card">
+            <div class="mb-2 fw-semibold">Temperature Over Time</div>
+            <div id="temp-chart" class="monitor-chart"></div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="panel-card">
+            <div class="mb-2 fw-semibold">Action Counts (Recent Window)</div>
+            <div id="action-chart" class="monitor-chart"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function loadCharts() {
+    const meta = document.getElementById("charts-meta");
+    try {
+        const resp = await fetch("/api/timeseries", { cache: "no-store" });
+        if (!resp.ok) throw new Error("Failed to load chart data");
+        const payload = await resp.json();
+        const points = Array.isArray(payload.points) ? payload.points : [];
+
+        if (!points.length) {
+            meta.textContent = "No telemetry yet. Start nodes and wait a few seconds.";
+            Plotly.newPlot("temp-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
+            Plotly.newPlot("action-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
+            return;
+        }
+
+        const byNode = {};
+        let targetSeries = [];
+        for (const p of points) {
+            const node = p.node_id || "unknown";
+            if (!byNode[node]) byNode[node] = { x: [], y: [] };
+            byNode[node].x.push(new Date((p.timestamp || 0) * 1000));
+            byNode[node].y.push(p.temp);
+            if (p.target_temp !== undefined && p.target_temp !== null) {
+                targetSeries.push({ x: new Date((p.timestamp || 0) * 1000), y: p.target_temp });
+            }
+        }
+
+        const tempTraces = Object.keys(byNode).sort().map((node) => ({
+            x: byNode[node].x,
+            y: byNode[node].y,
+            mode: "lines",
+            name: node,
+        }));
+
+        // Room average line helps evaluate convergence quality.
+        const avgByTime = {};
+        for (const p of points) {
+            const t = new Date((p.timestamp || 0) * 1000).toISOString();
+            if (!avgByTime[t]) avgByTime[t] = [];
+            if (typeof p.temp === "number") avgByTime[t].push(p.temp);
+        }
+        const avgTimes = Object.keys(avgByTime).sort();
+        const avgVals = avgTimes.map((k) => {
+            const vals = avgByTime[k];
+            return vals.reduce((a, b) => a + b, 0) / vals.length;
+        });
+        if (avgTimes.length) {
+            tempTraces.push({
+                x: avgTimes.map((t) => new Date(t)),
+                y: avgVals,
+                mode: "lines",
+                name: "room_avg",
+                line: { width: 4, color: "#111827" },
+            });
+        }
+
+        if (targetSeries.length) {
+            tempTraces.push({
+                x: targetSeries.map((p) => p.x),
+                y: targetSeries.map((p) => p.y),
+                mode: "lines",
+                name: "target",
+                line: { dash: "dash" },
+            });
+        }
+
+        Plotly.newPlot(
+            "temp-chart",
+            tempTraces,
+            {
+                margin: { t: 20, r: 10, b: 40, l: 50 },
+                xaxis: { title: "Time" },
+                yaxis: { title: "Temperature (C)", range: [0, 40] },
+                legend: { orientation: "h" },
+            },
+            { responsive: true }
+        );
+
+        const actionCounts = { HEAT_UP: 0, COOL_DOWN: 0, IDLE: 0 };
+        for (const p of points) {
+            const action = p.action || "IDLE";
+            if (actionCounts[action] === undefined) actionCounts[action] = 0;
+            actionCounts[action] += 1;
+        }
+        Plotly.newPlot(
+            "action-chart",
+            [{
+                type: "bar",
+                x: Object.keys(actionCounts),
+                y: Object.values(actionCounts),
+                marker: { color: ["#ef4444", "#3b82f6", "#10b981"] },
+            }],
+            { margin: { t: 20, r: 10, b: 40, l: 50 } },
+            { responsive: true }
+        );
+
+        meta.textContent = `${payload.count} points | ${Object.keys(byNode).length} nodes`;
+    } catch (err) {
+        meta.textContent = "Chart data unavailable";
+        console.error(err);
+    }
+}
+
+loadCharts();
+setInterval(loadCharts, 2000);
+</script>
+{% endblock %}
