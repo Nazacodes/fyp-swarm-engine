@@ -57,11 +57,14 @@ class SwarmNode:
         self.lock = threading.Lock()
         self.max_step_per_tick = 0.18
         self.outlier_pull = 0.18
+        self.window_open_until = 0.0
+        self.window_cooling_bonus = 0.0
         self.messenger.subscribe(
             [
                 "swarm.temperature.telemetry.*",
                 "swarm.temperature.heartbeat.*",
                 "swarm.temperature.cmd.target.set",
+                "swarm.temperature.cmd.window.open",
                 "swarm.temperature.leader.sync",
                 "swarm.temperature.group.target.*",
             ],
@@ -79,6 +82,7 @@ class SwarmNode:
                 "swarm.temperature.telemetry.*",
                 "swarm.temperature.heartbeat.*",
                 "swarm.temperature.cmd.target.set",
+                "swarm.temperature.cmd.window.open",
                 "swarm.temperature.leader.sync",
                 "swarm.temperature.group.target.*",
             ],
@@ -160,6 +164,14 @@ class SwarmNode:
                     self._broadcast_leader_sync()
                     self._broadcast_group_target()
             return
+        if topic == "swarm.temperature.cmd.window.open":
+            duration_sec = float(payload.get("duration_sec", 20.0))
+            strength = float(payload.get("strength", 0.12))
+            duration_sec = max(1.0, min(duration_sec, 300.0))
+            strength = max(0.01, min(strength, 0.18))
+            self.window_open_until = max(self.window_open_until, time.time() + duration_sec)
+            self.window_cooling_bonus = strength
+            return
 
         if topic == "swarm.temperature.leader.sync":
             msg_type = payload.get("type")
@@ -204,6 +216,12 @@ class SwarmNode:
 
         # Rate-limit actuator effect to reduce overshoot spikes.
         delta = max(-self.max_step_per_tick, min(self.max_step_per_tick, delta))
+        if time.time() < self.window_open_until:
+            # Simulated opened window should always force an observable cooling trend.
+            # Even if controller action is HEAT_UP, this keeps net delta negative.
+            delta -= self.window_cooling_bonus
+            forced_cooling_floor = -(0.10 + self.window_cooling_bonus)
+            delta = min(delta, forced_cooling_floor)
         self.current_temp += delta
 
     def _fresh_peers(self) -> Dict[str, Dict]:

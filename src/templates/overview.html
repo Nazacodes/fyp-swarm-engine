@@ -48,6 +48,7 @@
             <label for="target-input" class="small text-muted mb-0">Target (C)</label>
             <input id="target-input" type="number" step="0.1" min="0" max="40" value="{{ target_temp }}" class="form-control form-control-sm" style="width: 100px;">
             <button id="target-apply" class="btn btn-sm btn-primary">Apply</button>
+            <button id="window-open" class="btn btn-sm btn-outline-info">Open Window (20s)</button>
             <span id="target-status" class="small text-muted"></span>
         </div>
     </div>
@@ -123,6 +124,26 @@ document.getElementById("target-apply").addEventListener("click", applyTarget);
 document.getElementById("target-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") applyTarget();
 });
+
+async function openWindowSim() {
+    const status = document.getElementById("target-status");
+    status.textContent = "Opening window...";
+    try {
+        const resp = await fetch("/api/sim/open_window", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ duration_sec: 20, strength: 0.12 }),
+        });
+        if (!resp.ok) throw new Error("Window simulation failed");
+        const payload = await resp.json();
+        status.textContent = payload.published ? "Window opened simulation sent" : "Window event failed to broadcast";
+    } catch (err) {
+        status.textContent = "Window simulation failed";
+        console.error(err);
+    }
+}
+
+document.getElementById("window-open").addEventListener("click", openWindowSim);
 
 document.getElementById("refresh-now").addEventListener("click", () => {
     window.location.reload();

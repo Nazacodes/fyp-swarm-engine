@@ -232,6 +232,32 @@ def api_set_target():
     return jsonify({"ok": True, "target_temp": target, "target_version": version, "published": published})
 
 
+@app.route("/api/sim/open_window", methods=["POST"])
+def api_sim_open_window():
+    data = request.get_json(silent=True) or {}
+    duration_sec = float(data.get("duration_sec", 20.0))
+    strength = float(data.get("strength", 0.12))
+    duration_sec = max(1.0, min(duration_sec, 300.0))
+    strength = max(0.01, min(strength, 0.18))
+    payload = {
+        "type": "window_open",
+        "duration_sec": duration_sec,
+        "strength": strength,
+        "timestamp": time.time(),
+        "source": "web_monitor",
+    }
+    published = False
+    with MESSENGER_LOCK:
+        messenger = MONITOR_MESSENGER
+    if messenger is not None:
+        try:
+            messenger.publish("swarm.temperature.cmd.window.open", payload)
+            published = True
+        except Exception:
+            published = False
+    return jsonify({"ok": True, "published": published, "duration_sec": duration_sec, "strength": strength})
+
+
 @app.route("/api/gateway/join", methods=["POST"])
 def api_gateway_join():
     if not _check_gateway_auth():

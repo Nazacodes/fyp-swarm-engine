@@ -13,6 +13,7 @@
             <label for="target-input" class="small text-muted mb-0">Target (C)</label>
             <input id="target-input" type="number" step="0.1" min="0" max="40" class="form-control form-control-sm" style="width: 100px;">
             <button id="target-apply" class="btn btn-sm btn-primary">Apply</button>
+            <button id="window-open" class="btn btn-sm btn-outline-info">Open Window (20s)</button>
             <span id="target-status" class="small text-muted"></span>
             <span class="small text-muted" id="charts-meta">Loading recent telemetry...</span>
         </div>
@@ -44,6 +45,30 @@
 
 <script>
 let currentTarget = null;
+const CLOSE_VIEW_WINDOW_SECONDS = 180;
+
+function computeCloseViewYRange(traces, startMs, endMs) {
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const trace of traces) {
+        const xs = Array.isArray(trace.x) ? trace.x : [];
+        const ys = Array.isArray(trace.y) ? trace.y : [];
+        for (let i = 0; i < Math.min(xs.length, ys.length); i += 1) {
+            const xMs = xs[i] instanceof Date ? xs[i].getTime() : Number(xs[i]);
+            const yVal = Number(ys[i]);
+            if (!Number.isFinite(xMs) || !Number.isFinite(yVal)) continue;
+            if (xMs < startMs || xMs > endMs) continue;
+            minY = Math.min(minY, yVal);
+            maxY = Math.max(maxY, yVal);
+        }
+    }
+    if (!Number.isFinite(minY) || !Number.isFinite(maxY)) {
+        return null;
+    }
+    const span = Math.max(0.2, maxY - minY);
+    const pad = Math.max(0.1, span * 0.15);
+    return [minY - pad, maxY + pad];
+}
 
 async function loadCurrentTarget() {
     const input = document.getElementById("target-input");
@@ -89,6 +114,24 @@ async function applyTarget() {
     }
 }
 
+async function openWindowSim() {
+    const status = document.getElementById("target-status");
+    status.textContent = "Opening window...";
+    try {
+        const resp = await fetch("/api/sim/open_window", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ duration_sec: 20, strength: 0.12 }),
+        });
+        if (!resp.ok) throw new Error("Window simulation failed");
+        const payload = await resp.json();
+        status.textContent = payload.published ? "Window opened simulation sent" : "Window event failed to broadcast";
+    } catch (err) {
+        status.textContent = "Window simulation failed";
+        console.error(err);
+    }
+}
+
 async function loadCharts() {
     const meta = document.getElementById("charts-meta");
     try {
@@ -100,9 +143,9 @@ async function loadCharts() {
 
         if (!points.length) {
             meta.textContent = "No telemetry yet. Start nodes and wait a few seconds.";
-            Plotly.newPlot("temp-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
-            Plotly.newPlot("action-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
-            Plotly.newPlot("temp-chart-close", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
+            Plotly.react("temp-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 }, uirevision: "temp-chart" }, { responsive: true });
+            Plotly.react("action-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 }, uirevision: "action-chart" }, { responsive: true });
+            Plotly.react("temp-chart-close", [], { margin: { t: 20, r: 10, b: 40, l: 50 }, uirevision: "temp-chart-close" }, { responsive: true });
             return;
         }
 
@@ -166,7 +209,7 @@ async function loadCharts() {
             });
         }
 
-        Plotly.newPlot(
+        Plotly.react(
             "temp-chart",
             tempTraces,
             {
@@ -174,10 +217,11 @@ async function loadCharts() {
                 xaxis: { title: "Time" },
                 yaxis: { title: "Temperature (C)", range: [0, 40] },
                 legend: { orientation: "h" },
+                uirevision: "temp-chart",
             },
             { responsive: true }
         );
-        Plotly.newPlot(
+        Plotly.react(
             "temp-chart-close",
             tempTraces,
             {
@@ -185,9 +229,21 @@ async function loadCharts() {
                 xaxis: { title: "Time" },
                 yaxis: { title: "Temperature (C)", autorange: true },
                 legend: { orientation: "h" },
+                uirevision: "temp-chart-close",
             },
             { responsive: true }
         );
+        if (points.length) {
+            const lastTs = Number(points[points.length - 1].timestamp || 0) * 1000;
+            const firstTs = Number(points[0].timestamp || 0) * 1000;
+            const desiredStart = Math.max(0, lastTs - CLOSE_VIEW_WINDOW_SECONDS * 1000);
+            const startTs = Math.max(firstTs, desiredStart);
+            const yRange = computeCloseViewYRange(tempTraces, startTs, lastTs);
+            Plotly.relayout("temp-chart-close", {
+                "xaxis.range": [new Date(startTs), new Date(lastTs)],
+                ...(yRange ? { "yaxis.range": yRange } : { "yaxis.autorange": true }),
+            });
+        }
 
         const actionCounts = { HEAT_UP: 0, COOL_DOWN: 0, IDLE: 0 };
         for (const p of points) {
@@ -195,7 +251,7 @@ async function loadCharts() {
             if (actionCounts[action] === undefined) actionCounts[action] = 0;
             actionCounts[action] += 1;
         }
-        Plotly.newPlot(
+        Plotly.react(
             "action-chart",
             [{
                 type: "bar",
@@ -203,7 +259,7 @@ async function loadCharts() {
                 y: Object.values(actionCounts),
                 marker: { color: ["#ef4444", "#3b82f6", "#10b981"] },
             }],
-            { margin: { t: 20, r: 10, b: 40, l: 50 } },
+            { margin: { t: 20, r: 10, b: 40, l: 50 }, uirevision: "action-chart" },
             { responsive: true }
         );
 
@@ -216,6 +272,7 @@ async function loadCharts() {
 }
 
 document.getElementById("target-apply").addEventListener("click", applyTarget);
+document.getElementById("window-open").addEventListener("click", openWindowSim);
 document.getElementById("target-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") applyTarget();
 });
