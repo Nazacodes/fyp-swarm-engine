@@ -4,5 +4,4 @@ flask>=2.0.0
 matplotlib>=3.5.0
 plotly>=5.0.0
 cryptography>=42.0.0
-paho-mqtt>=2.1.0
 bleak>=0.22.0

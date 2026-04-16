@@ -21,8 +21,7 @@ fyp-swarm-engine/
 │   ├── join_swarm.py            # Edge auto-discovery join helper
 │   ├── gateway_client.py        # HTTP gateway join simulator
 │   ├── bluetooth_adapter_rmq.py # BLE-style join over RabbitMQ
-│   ├── ble_adapter.py           # Real BLE adapter (bleak)
-│   └── zigbee_adapter.py        # Real Zigbee adapter (Zigbee2MQTT path)
+│   └── ble_adapter.py           # Real BLE adapter (bleak)
 ├── nodes/
 │   ├── README.md
 │   └── configs/                 # Preferred home for config_node*.json
@@ -85,13 +84,12 @@ python generate_10_configs.py
 - Auto-discovery edge join (Pi-friendly): `scripts/join_swarm.py`
 - BLE over RabbitMQ: `scripts/bluetooth_adapter_rmq.py`
 - Real BLE hardware adapter: `scripts/ble_adapter.py`
-- Real Zigbee adapter path: `scripts/zigbee_adapter.py` (requires Zigbee2MQTT + MQTT)
 
 See:
 - `docs/protocol_agnostic.md`
 - `docs/bluetooth_rabbitmq_adapter.md`
 - `docs/ble_real_adapter.md`
-- `docs/zigbee_real_adapter.md`
+- `docs/RUN_SCRIPTS.md`
 
 ## Raspberry Pi Auto-Join
 
