@@ -27,6 +27,14 @@
         </div>
     </div>
 </div>
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="panel-card">
+            <div class="mb-2 fw-semibold">Temperature Over Time (Auto-Scaled Close View)</div>
+            <div id="temp-chart-close" class="monitor-chart"></div>
+        </div>
+    </div>
+</div>
 
 <script>
 async function loadCharts() {
@@ -41,6 +49,7 @@ async function loadCharts() {
             meta.textContent = "No telemetry yet. Start nodes and wait a few seconds.";
             Plotly.newPlot("temp-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
             Plotly.newPlot("action-chart", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
+            Plotly.newPlot("temp-chart-close", [], { margin: { t: 20, r: 10, b: 40, l: 50 } }, { responsive: true });
             return;
         }
 
@@ -102,6 +111,17 @@ async function loadCharts() {
                 margin: { t: 20, r: 10, b: 40, l: 50 },
                 xaxis: { title: "Time" },
                 yaxis: { title: "Temperature (C)", range: [0, 40] },
+                legend: { orientation: "h" },
+            },
+            { responsive: true }
+        );
+        Plotly.newPlot(
+            "temp-chart-close",
+            tempTraces,
+            {
+                margin: { t: 20, r: 10, b: 40, l: 50 },
+                xaxis: { title: "Time" },
+                yaxis: { title: "Temperature (C)", autorange: true },
                 legend: { orientation: "h" },
             },
             { responsive: true }
