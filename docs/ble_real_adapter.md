@@ -32,3 +32,4 @@ python scripts/ble_adapter.py \
   - `0x2A6E` (Environmental Sensing)
 - Devices without readable temperature characteristics will still be discovered, but telemetry temperature may remain `None`.
 - You can extend `TEMP_CHAR_UUIDS` in the script for your device-specific characteristics.
+

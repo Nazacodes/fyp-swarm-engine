@@ -55,6 +55,8 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--batch-size", type=int, default=5)
     parser.add_argument("--groups", type=int, default=1)
+    parser.add_argument("--enable-beacon", action="store_true", default=True)
+    parser.add_argument("--discovery-port", type=int, default=5679)
     parser.add_argument("--batch-wait", type=float, default=5.0)
     parser.add_argument("--heartbeat-interval", type=float, default=0.7)
     parser.add_argument("--tick-seconds", type=float, default=0.7)
@@ -85,6 +87,26 @@ def main() -> int:
     print(f"Monitor started on http://localhost:{args.port}")
     time.sleep(2.0)
 
+    beacon = None
+    if args.enable_beacon:
+        beacon = _spawn(
+            [
+                PY,
+                "scripts/swarm_beacon.py",
+                "--rabbit-host",
+                "localhost",
+                "--rabbit-port",
+                "5672",
+                "--monitor-port",
+                str(args.port),
+                "--discovery-port",
+                str(args.discovery_port),
+            ],
+            base_env,
+            logs_dir / "beacon.log",
+        )
+        print(f"Discovery beacon active on UDP {args.discovery_port}")
+
     def start_node(i: int) -> None:
         node_id = f"node{i}"
         env = base_env.copy()
@@ -92,8 +114,12 @@ def main() -> int:
         env["PEER_PORT"] = str(9300 + i)
         group_index = ((i - 1) % max(1, args.groups)) + 1
         env["GROUP_ID"] = f"zone_{group_index}"
-        cfg = ROOT / f"config_node{i}.json"
-        cmd = [PY, "src/node.py", "--config", str(cfg)] if cfg.exists() else [PY, "src/node.py"]
+        cfg = ROOT / "nodes" / "configs" / f"config_node{i}.json"
+        if not cfg.exists():
+            print(f"[warn] Missing config for {node_id}: expected {cfg}. Starting with env defaults.")
+            cmd = [PY, "src/node.py"]
+        else:
+            cmd = [PY, "src/node.py", "--config", str(cfg)]
         processes[node_id] = _spawn(cmd, env, logs_dir / f"{node_id}.log")
 
     for i in range(1, args.nodes + 1):
@@ -170,6 +196,11 @@ def main() -> int:
         try:
             if monitor.poll() is None:
                 monitor.terminate()
+        except Exception:
+            pass
+        try:
+            if beacon is not None and beacon.poll() is None:
+                beacon.terminate()
         except Exception:
             pass
     return 0

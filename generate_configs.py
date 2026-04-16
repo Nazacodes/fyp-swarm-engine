@@ -1,11 +1,12 @@
 #!/usr/bin/env python
-"""Generate 50 config files with varied starting temperatures."""
+"""Generate node config files under nodes/configs/."""
 
 import json
-import os
+from pathlib import Path
 
 # Create 50 config files with varied starting temperatures
-configs_dir = "."
+configs_dir = Path("nodes") / "configs"
+configs_dir.mkdir(parents=True, exist_ok=True)
 target_temp = 22.0
 
 # Cold nodes: 10-19°C (20 nodes)
@@ -32,9 +33,9 @@ for i, start_temp in enumerate(all_temps, 1):
     }
     
     filename = f"config_node{i}.json"
-    filepath = os.path.join(configs_dir, filename)
+    filepath = configs_dir / filename
     
-    with open(filepath, 'w') as f:
+    with open(filepath, 'w', encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     
     print(f"Created {filename} with start_temp={start_temp:.1f}°C")

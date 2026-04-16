@@ -42,3 +42,4 @@ python scripts/zigbee_adapter.py \
 - Device command schemas vary by converter/device in Zigbee2MQTT.
 - The script sends a generic `{ "target_temp": <value> }` set payload.
 - If your device expects different keys, adapt `_push_target_to_devices()` accordingly.
+
