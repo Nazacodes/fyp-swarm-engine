@@ -145,9 +145,8 @@ class SwarmNode:
             with self.lock:
                 self.peer_state[sender] = {"payload": payload, "last_seen": time.time()}
         if topic == "swarm.temperature.cmd.target.set":
-            # Full-system path: leaders coordinate target updates, then fan out per group.
-            if not self.is_leader:
-                return
+            # Apply monitor-issued target updates on every node immediately.
+            # Leaders also fan the update out for cross-group consistency.
             target = payload.get("target_temp")
             if target is None:
                 return
@@ -157,8 +156,9 @@ class SwarmNode:
                 incoming_version = self._next_target_version()
             if self._is_newer_target(incoming_epoch, incoming_version):
                 self._apply_target(float(target), incoming_epoch, incoming_version)
-                self._broadcast_leader_sync()
-                self._broadcast_group_target()
+                if self.is_leader:
+                    self._broadcast_leader_sync()
+                    self._broadcast_group_target()
             return
 
         if topic == "swarm.temperature.leader.sync":
